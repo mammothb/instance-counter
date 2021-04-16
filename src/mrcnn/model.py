@@ -35,6 +35,9 @@ from distutils.version import LooseVersion
 assert LooseVersion(tf.__version__) >= LooseVersion("1.3")
 assert LooseVersion(keras.__version__) >= LooseVersion('2.0.8')
 
+from tensorflow.python.ops import gen_image_ops
+tf.image.non_max_suppression = gen_image_ops.non_max_suppression_v2
+
 
 ############################################################
 #  Utility Functions

@@ -1,5 +1,7 @@
 import numpy as np
 
+import src.mrcnn.visualize as mrcnn_viz
+
 def create_pascal_label_colormap():
     """Creates a label colormap used in PASCAL VOC segmentation benchmark.
 
@@ -16,7 +18,8 @@ def create_pascal_label_colormap():
 
     return colormap
 
-def label_to_color_image(label):
+
+def label_to_color_image(label, label_merge):
     """Adds color defined by the dataset colormap to the label.
 
     Args:
@@ -39,4 +42,20 @@ def label_to_color_image(label):
     if np.max(label) >= len(colormap):
         raise ValueError("label value too large.")
 
-    return colormap[label]
+    return colormap[label_merge[label]]
+
+
+def display_segmentation(image, seg_map, label_names, label_merge):
+    """Visualizes input image, segmentation map and overlay view."""
+    colormap = create_pascal_label_colormap()
+
+    im_copy = image.copy()
+    unique_labels = np.unique(seg_map)
+    for i in unique_labels:
+        if label_names[i] == "person":
+            continue
+        im_copy = mrcnn_viz.apply_mask(
+            im_copy, seg_map == i, colormap[label_merge[i]][::-1]
+        )
+
+    return im_copy
