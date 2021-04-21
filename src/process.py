@@ -17,95 +17,86 @@ from src.mrcnn.model import MaskRCNN
 import src.mrcnn.visualize as mrcnn_viz
 
 
-ROOT_DIR = os.path.abspath(".")
-LOGS_DIR = os.path.join(ROOT_DIR, "logs")
-MODEL_DIR = os.path.join(ROOT_DIR, "weights")
-
-# DeepLab
-DL_MODEL_PATH = os.path.join(MODEL_DIR, "deeplab_model.tar.gz")
-DL_URL = (
-    "http://download.tensorflow.org/models/"
-    "deeplabv3_mnv2_ade20k_train_2018_12_03.tar.gz"
-)
-
-if not os.path.exists(DL_MODEL_PATH):
-    print("Downloading DeepLab model...")
-    urllib.request.urlretrieve(DL_URL, DL_MODEL_PATH)
-    print("Download complete, loading DeepLab model...")
-
-DL_MODEL = DeepLabModel(DL_MODEL_PATH)
-print("DeepLab model loaded successfully!")
-
-# MRCNN
 class InferenceConfig(coco.CocoConfig):
     # Set batch size to 1 since we'll be running inference on
     # one image at a time. Batch size = GPU_COUNT * IMAGES_PER_GPU
     GPU_COUNT = 1
     IMAGES_PER_GPU = 1
 
-MRCNN_MODEL_PATH = os.path.join(MODEL_DIR, "mask_rcnn_coco.h5")
-# Download COCO trained weights from Releases if needed
-if not os.path.exists(MRCNN_MODEL_PATH):
-    utils.download_trained_weights(MRCNN_MODEL_PATH)
-config = InferenceConfig()
-# Create model object in inference mode.
-MRCNN_MODEL = MaskRCNN(mode="inference", model_dir=LOGS_DIR, config=config)
 
-# Load weights trained on MS-COCO
-MRCNN_MODEL.load_weights(MRCNN_MODEL_PATH, by_name=True)
+class Processor:
+    def __init__(self, logs_path, semantic_seg_path, instance_seg_path):
+        self.semantic_seg = DeepLabModel(semantic_seg_path)
 
-VIDEO_PATH = os.path.join(ROOT_DIR, "videos", "People_sample_2.mp4")
+        instance_seg_config = InferenceConfig()
+        self.instance_seg = MaskRCNN(
+            mode="inference", model_dir=logs_path, config=instance_seg_config
+        )
+        self.instance_seg.load_weights(instance_seg_path, by_name=True)
 
-cap = cv2.VideoCapture(VIDEO_PATH)
-fps = cap.get(cv2.CAP_PROP_FPS)
-output_path = f"{os.path.splitext(VIDEO_PATH)[0]}_processed.avi"
+    def process_video(self, video_path):
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        output_path = f"{os.path.splitext(video_path)[0]}_processed.avi"
 
-vid_writer = cv2.VideoWriter(
-    output_path,
-    cv2.VideoWriter_fourcc("M", "J", "P", "G"),
-    fps,
-    (
-        round(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-        round(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-    ),
-)
+        vid_writer = cv2.VideoWriter(
+            output_path,
+            cv2.VideoWriter_fourcc("M", "J", "P", "G"),
+            fps,
+            (
+                round(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                round(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+            ),
+        )
 
-sec = 0
-while True:
-    print(sec)
-    cap.set(1, sec * fps)
-    # Get frame from the video
-    has_frame, frame = cap.read()
+        sec = 0
+        while True:
+            print(sec)
+            cap.set(1, sec * fps)
+            # Get frame from the video
+            has_frame, frame = cap.read()
 
-    # Stop the program if reached end of video
-    if not has_frame:
-        print("Done processing !!!")
-        print(f"Output file is stored as {output_path}")
-        break
+            # Stop the program if reached end of video
+            if not has_frame:
+                print("Done processing!")
+                print(f"Output file is stored as {output_path}")
+                break
 
-    _, seg_map = DL_MODEL.run(Image.fromarray(frame[:, :, ::-1]))
-    seg_map = cv2.resize(
-        seg_map, frame.shape[:-1][::-1], interpolation=cv2.INTER_NEAREST
-    )
-    frame_copy = dl_viz.display_segmentation(
-        frame, seg_map, DL_LABEL_NAMES, DL_LABEL_MERGE
-    )
+            _, seg_map = self.semantic_seg.run(
+                Image.fromarray(frame[:, :, ::-1])
+            )
+            seg_map = cv2.resize(
+                seg_map, frame.shape[:-1][::-1], interpolation=cv2.INTER_NEAREST
+            )
+            frame_copy = dl_viz.display_segmentation(
+                frame, seg_map, DL_LABEL_NAMES, DL_LABEL_MERGE
+            )
 
-    results = MRCNN_MODEL.detect([frame[:, :, ::-1]])
-    r = results[0]
-    frame_copy = mrcnn_viz.display_instances(
-        frame_copy,
-        r["rois"],
-        r["masks"],
-        r["class_ids"],
-        MRCNN_LABEL_NAMES,
-        r["scores"],
-    )
+            results = self.instance_seg.detect([frame[:, :, ::-1]])
+            r = results[0]
+            frame_copy = mrcnn_viz.display_instances(
+                frame_copy,
+                r["rois"],
+                r["masks"],
+                r["class_ids"],
+                MRCNN_LABEL_NAMES,
+                r["scores"],
+            )
 
-    # Write the frame with the detection boxes
-    vid_writer.write(frame_copy.astype(np.uint8))
-    sec += 1
-cap.release()
+            # Write the frame with the detection boxes
+            vid_writer.write(frame_copy.astype(np.uint8))
+            sec += 1
+        cap.release()
 
-# if __name__ == "__main__":
-#     process_video(video_path)
+
+if __name__ == "__main__":
+    root_dir = os.path.abspath(".")
+    logs_dir = os.path.join(root_dir, "logs")
+    weights_dir = os.path.join(root_dir, "weights")
+
+    dl_model_path = os.path.join(weights_dir, "deeplab_model.tar.gz")
+    mrcnn_model_path = os.path.join(weights_dir, "mask_rcnn_coco.h5")
+    video_path = os.path.join(root_dir, "videos", "People_sample_2.mp4")
+
+    processor = Processor(logs_dir, dl_model_path, mrcnn_model_path)
+    processor.process_video(video_path)
